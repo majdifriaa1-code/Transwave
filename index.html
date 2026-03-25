@@ -45,13 +45,14 @@
         .alert-success { background-color: var(--success-bg); color: var(--success-text); border-color: #86efac; }
         .alert-title { font-weight: bold; margin-bottom: 0.5rem; }
         .solution { margin-top: 0.5rem; font-style: italic; font-weight: bold; }
+        .ref-list { font-size: 0.9em; margin: 10px 0; padding-left: 20px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>Contrôleur de Contraintes - Camaret</h1>
-    <p class="subtitle">Copiez votre tableau brut (y compris les semaines type s14/2026) et collez-le ici.</p>
+    <p class="subtitle">Copiez votre tableau brut (y compris les semaines type s14/2026 et le stock) et collez-le ici.</p>
 
     <div class="card">
         <textarea id="dataInput" placeholder="Collez le tableau Excel ici..."></textarea>
@@ -74,7 +75,7 @@ function analyserPlanif() {
 
     const rows = rawData.split('\n').map(row => row.split('\t'));
     
-    // NOUVEAU : On accepte les dates (JJ/MM/AAAA) OU les semaines (s14/2026 ou S14/2026)
+    // Expression régulière pour les dates ou les semaines
     const dateOrWeekRegex = /(\d{2}[\/-]\d{2}[\/-]\d{2,4})|([sS]\d{1,2}\/\d{4})/; 
 
     let headerRowIndex = -1;
@@ -100,21 +101,45 @@ function analyserPlanif() {
     const headers = rows[headerRowIndex];
     let colFormat = -1;
     let colLigne = -1;
+    let colNom = 0;
+    let colStock = -1; // NOUVEAU : Colonne de stock
 
     // 2. Identification des colonnes
     for (let i = 0; i < headers.length; i++) {
         let h = headers[i].toLowerCase();
         if (h.includes("format")) colFormat = i;
         if (h.includes("ligne") || h.includes("boite")) colLigne = i;
+        if (h.includes("nom") || h.includes("article")) colNom = i;
+        if (h.includes("stock") || h.includes("aujourd'hui")) colStock = i; // Détection du stock
     }
 
     if (colLigne === -1) {
-        colLigne = colDateStart - 1; // On déduit la colonne juste avant les dates
+        colLigne = colDateStart - 1; 
     }
 
     if (colFormat === -1 || colLigne === -1) {
         resultsArea.innerHTML += '<div class="alert alert-error">Impossible de détecter la colonne Format ou Ligne.</div>';
         return;
+    }
+
+    // NOUVEAU : INITIALISATION DES STOCKS DE BOITES BLANCHES (BS)
+    let stockDispoBS = {};
+    if (colStock !== -1) {
+        for (let r = headerRowIndex + 1; r < rows.length; r++) {
+            let row = rows[r];
+            let ligne = row[colLigne] ? row[colLigne].trim().toUpperCase() : "";
+            let isBS = ligne.includes('42') || ligne.includes('43') || ligne.includes('31') || ligne.includes('70');
+            
+            if (isBS) {
+                let codeFamille = ligne.split('-')[1]; // Ex: 4243-30461 -> on garde 30461
+                if (codeFamille) {
+                    let rawStock = row[colStock] ? row[colStock].replace(/\s/g, '').replace(',', '.') : "0";
+                    let stockVal = parseFloat(rawStock) || 0;
+                    if (!stockDispoBS[codeFamille]) stockDispoBS[codeFamille] = 0;
+                    stockDispoBS[codeFamille] += stockVal;
+                }
+            }
+        }
     }
 
     let hasErrorsGlobal = false;
@@ -123,11 +148,11 @@ function analyserPlanif() {
     for (let dayIndex = colDateStart; dayIndex < headers.length; dayIndex++) {
         const currentDate = headers[dayIndex] ? headers[dayIndex].trim() : "";
         
-        // On vérifie que c'est bien une date ou une semaine
         if (!currentDate.match(dateOrWeekRegex)) continue; 
 
-        let bs_1_2 = 0, bs_3_2 = 0, pf_1_2 = 0, pf_3_2 = 0;
-        let l43_1_2 = 0, l31_1_2 = 0, l70_1_2 = 0;
+        let bs_1_2 = [], bs_3_2 = [], pf_1_2 = [], pf_3_2 = [];
+        let l43_1_2 = [], l31_1_2 = [], l70_1_2 = [];
+        let bs_4_4 = [], pf_4_4 = []; 
 
         for (let r = headerRowIndex + 1; r < rows.length; r++) {
             const row = rows[r];
@@ -137,70 +162,130 @@ function analyserPlanif() {
             let prodQty = parseFloat(rawCell) || 0;
             if (prodQty <= 0) continue; 
 
+            let nomArticle = row[colNom] ? row[colNom].trim() : "Article inconnu";
             let format = row[colFormat] ? row[colFormat].trim() : "";
             let ligne = row[colLigne] ? row[colLigne].trim().toUpperCase() : "";
             
             let isBS = ligne.includes('42') || ligne.includes('43') || ligne.includes('31') || ligne.includes('70');
             let isPF = ligne.includes('52') || ligne.includes('CDTL');
 
-            // Collecte de données
+            let item = { nom: nomArticle, machine: ligne, qty: prodQty };
+
             if (format.includes('1/2')) {
-                if (isBS) bs_1_2 += prodQty;
-                if (isPF) pf_1_2 += prodQty;
+                if (isBS) bs_1_2.push(item);
+                if (isPF) pf_1_2.push(item);
                 
-                if (ligne.includes('43')) l43_1_2 += prodQty;
-                if (ligne.includes('31')) l31_1_2 += prodQty;
-                if (ligne.includes('70')) l70_1_2 += prodQty;
+                if (ligne.includes('43')) l43_1_2.push(item);
+                if (ligne.includes('31')) l31_1_2.push(item);
+                if (ligne.includes('70')) l70_1_2.push(item);
             }
             if (format.includes('3/2')) {
-                if (isBS) bs_3_2 += prodQty;
-                if (isPF) pf_3_2 += prodQty;
+                if (isBS) bs_3_2.push(item);
+                if (isPF) pf_3_2.push(item);
+            }
+            if (format.includes('4/4')) {
+                if (isBS) bs_4_4.push(item);
+                if (isPF) pf_4_4.push(item);
             }
         }
 
-        // Est-ce une analyse au jour ou à la semaine ?
         let periodLabel = currentDate.toLowerCase().startsWith('s') ? "Semaine" : "Date";
+        let isWeek = periodLabel === "Semaine";
         let dailyReport = `<div class="report-day"><h3>🗓️ ${periodLabel} : ${currentDate}</h3>`;
         let errorsToday = 0;
 
         // Règle 1 : PAL 16
-        if ((bs_1_2 > 0 || bs_3_2 > 0) && (pf_1_2 > 0 || pf_3_2 > 0)) {
+        if ((bs_1_2.length > 0 || bs_3_2.length > 0) && (pf_1_2.length > 0 || pf_3_2.length > 0)) {
+            let refsFabrication = [...bs_1_2, ...bs_3_2].map(i => `<li><b>BS :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
+            let refsConditionnement = [...pf_1_2, ...pf_3_2].map(i => `<li><b>PF :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
+            
+            let conflitTitre = isWeek ? "❌ Conflit potentiel sur le PAL 16" : "❌ Conflit BLOQUANT sur le PAL 16";
+            let solutionTexte = isWeek ? 
+                "Attention : Sur une semaine complète, assurez-vous de ne pas planifier la Fab et le Condi ci-dessus le MÊME JOUR." : 
+                "Solution : Le PAL 16 ne fait qu'une action. Décalez le conditionnement de ces PF à un jour sans fabrication de format 1/2 ou 3/2.";
+
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">❌ Conflit potentiel sur le PAL 16</div>
-                Production détectée en Fabrication (BS) ET en Conditionnement (PF) pour les formats 1/2 ou 3/2 sur cette période. Le PAL 16 ne peut faire qu'une action par jour. 
-                <div class="solution">Attention : Sur une semaine complète, assurez-vous de ne pas planifier la Fab et le Condi le MÊME JOUR.</div>
+                <div class="alert-title">${conflitTitre}</div>
+                Production détectée en Fabrication (BS) ET en Conditionnement (PF) pour les formats 1/2 ou 3/2 sur cette période :
+                <ul class="ref-list">${refsFabrication}${refsConditionnement}</ul>
+                <div class="solution">${solutionTexte}</div>
             </div>`;
             errorsToday++;
         }
 
         // Règle 2 : Stérilisateur 1
-        let activeSter1Lines = (l43_1_2 > 0 ? 1 : 0) + (l31_1_2 > 0 ? 1 : 0) + (l70_1_2 > 0 ? 1 : 0);
+        let activeSter1Lines = (l43_1_2.length > 0 ? 1 : 0) + (l31_1_2.length > 0 ? 1 : 0) + (l70_1_2.length > 0 ? 1 : 0);
         if (activeSter1Lines > 1) {
+            let refsSter = [...l43_1_2, ...l31_1_2, ...l70_1_2].map(i => `<li>${i.nom} (Ligne ${i.machine})</li>`).join('');
+            let conflitTitre = isWeek ? "❌ Conflit potentiel sur le Stérilisateur 1 (STER 01)" : "❌ Conflit BLOQUANT sur le Stérilisateur 1 (STER 01)";
+            let solutionTexte = isWeek ? "Attention : Assurez-vous que ces fabrications ne tournent pas simultanément le même jour." : "Solution : Ne faire tourner qu'une seule de ces lignes pour le format 1/2 ce jour-là.";
+
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">❌ Conflit potentiel sur le Stérilisateur 1 (STER 01)</div>
-                Plusieurs lignes de Fabrication (BS) au format 1/2 sont prévues.
-                <div class="solution">Attention : Assurez-vous qu'elles ne tournent pas simultanément le même jour.</div>
+                <div class="alert-title">${conflitTitre}</div>
+                Plusieurs lignes de Fabrication (BS) au format 1/2 sont prévues en même temps :
+                <ul class="ref-list">${refsSter}</ul>
+                <div class="solution">${solutionTexte}</div>
+            </div>`;
+            errorsToday++;
+        }
+
+        // NOUVEAU : Règle 3 - Quarantaine avec prise en compte du stock
+        let pfEnQuarantaine = [];
+        let pfDailyNeeds = {};
+        
+        let pfPrevu = [...pf_1_2, ...pf_3_2, ...pf_4_4];
+        pfPrevu.forEach(pf => {
+            let codeFamillePF = pf.machine.split('-')[1];
+            if (codeFamillePF) {
+                if (!pfDailyNeeds[codeFamillePF]) pfDailyNeeds[codeFamillePF] = { qty: 0, items: [] };
+                pfDailyNeeds[codeFamillePF].qty += pf.qty;
+                pfDailyNeeds[codeFamillePF].items.push(pf.nom);
+            }
+        });
+
+        for (let codeFamille in pfDailyNeeds) {
+            let besoin = pfDailyNeeds[codeFamille].qty;
+            let stockDispo = stockDispoBS[codeFamille] || 0; 
+
+            if (besoin > stockDispo) {
+                let manquant = besoin - stockDispo;
+                let noms = pfDailyNeeds[codeFamille].items.join(', ');
+                pfEnQuarantaine.push(`<li><b>PF prévu :</b> ${noms} <br><i>Besoin : ${besoin.toLocaleString('fr-FR')} | Stock initial : ${stockDispo.toLocaleString('fr-FR')} | <b>Manquant : ${manquant.toLocaleString('fr-FR')} boîtes</b>. (Ce manque tape dans la prod récente = violation quarantaine)</i></li>`);
+                stockDispoBS[codeFamille] = 0; // On a vidé le stock
+            } else {
+                stockDispoBS[codeFamille] -= besoin; // On déduit le besoin du stock pour les jours d'après
+            }
+        }
+
+        if (pfEnQuarantaine.length > 0) {
+            dailyReport += `
+            <div class="alert alert-error">
+                <div class="alert-title">⚠️ Violation de la Quarantaine (8 jours)</div>
+                Le stock actuel de boîtes blanches est insuffisant pour couvrir ce conditionnement :
+                <ul class="ref-list">${pfEnQuarantaine.join('')}</ul>
+                <div class="solution">Solution : Retardez ces conditionnements de 8 jours pour laisser mûrir les nouvelles fabrications.</div>
             </div>`;
             errorsToday++;
         }
 
         if (errorsToday === 0) {
-            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes majeures (PAL 16, STER 01) semblent respectées pour cette période.</div>`;
+            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes (PAL 16, STER 01, Stocks/Quarantaine) sont respectées.</div>`;
         } else {
             hasErrorsGlobal = true;
         }
 
         dailyReport += `</div>`;
         
-        if (bs_1_2 > 0 || bs_3_2 > 0 || pf_1_2 > 0 || pf_3_2 > 0 || errorsToday > 0) {
+        let totalProd = bs_1_2.length + bs_3_2.length + pf_1_2.length + pf_3_2.length + bs_4_4.length + pf_4_4.length;
+        if (totalProd > 0 || errorsToday > 0) {
             resultsArea.innerHTML += dailyReport;
         }
     }
 
     if (!hasErrorsGlobal) {
-        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté sur l\'ensemble des dates et semaines !</div>' + resultsArea.innerHTML;
+        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté, et les stocks couvrent bien vos conditionnements !</div>' + resultsArea.innerHTML;
     }
 }
 </script>
