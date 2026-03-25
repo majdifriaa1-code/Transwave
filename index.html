@@ -51,7 +51,7 @@
 
 <div class="container">
     <h1>Contrôleur de Contraintes - Camaret</h1>
-    <p class="subtitle">Copiez votre tableau brut (y compris les lignes parasites) et collez-le ici.</p>
+    <p class="subtitle">Copiez votre tableau brut (y compris les semaines type s14/2026) et collez-le ici.</p>
 
     <div class="card">
         <textarea id="dataInput" placeholder="Collez le tableau Excel ici..."></textarea>
@@ -73,15 +73,17 @@ function analyserPlanif() {
     }
 
     const rows = rawData.split('\n').map(row => row.split('\t'));
-    const dateRegex = /\d{2}[\/-]\d{2}[\/-]\d{2,4}/; 
+    
+    // NOUVEAU : On accepte les dates (JJ/MM/AAAA) OU les semaines (s14/2026 ou S14/2026)
+    const dateOrWeekRegex = /(\d{2}[\/-]\d{2}[\/-]\d{2,4})|([sS]\d{1,2}\/\d{4})/; 
 
     let headerRowIndex = -1;
     let colDateStart = -1;
 
-    // 1. Chasse à l'en-tête : on cherche la ligne qui contient la première date
+    // 1. Chasse à l'en-tête
     for (let i = 0; i < rows.length; i++) {
         for (let j = 0; j < rows[i].length; j++) {
-            if (rows[i][j] && rows[i][j].trim().match(dateRegex)) {
+            if (rows[i][j] && rows[i][j].trim().match(dateOrWeekRegex)) {
                 headerRowIndex = i;
                 colDateStart = j;
                 break;
@@ -91,7 +93,7 @@ function analyserPlanif() {
     }
 
     if (headerRowIndex === -1) {
-        resultsArea.innerHTML += '<div class="alert alert-error">Impossible de trouver les dates (ex: 22/03/2026).</div>';
+        resultsArea.innerHTML += '<div class="alert alert-error">Impossible de trouver les dates ou les semaines (ex: 22/03/2026 ou s14/2026).</div>';
         return;
     }
 
@@ -99,17 +101,15 @@ function analyserPlanif() {
     let colFormat = -1;
     let colLigne = -1;
 
-    // 2. Identification des colonnes Format et Ligne
+    // 2. Identification des colonnes
     for (let i = 0; i < headers.length; i++) {
         let h = headers[i].toLowerCase();
         if (h.includes("format")) colFormat = i;
         if (h.includes("ligne") || h.includes("boite")) colLigne = i;
     }
 
-    // ASTUCE : Si la colonne Ligne n'a pas de nom (trou dans l'Excel), 
-    // on sait qu'elle est toujours située juste avant la première date !
     if (colLigne === -1) {
-        colLigne = colDateStart - 1;
+        colLigne = colDateStart - 1; // On déduit la colonne juste avant les dates
     }
 
     if (colFormat === -1 || colLigne === -1) {
@@ -119,17 +119,16 @@ function analyserPlanif() {
 
     let hasErrorsGlobal = false;
 
-    // 3. Analyse jour par jour (en ignorant les colonnes semaines de type s14/2026)
+    // 3. Analyse de toutes les colonnes (Jours ET Semaines)
     for (let dayIndex = colDateStart; dayIndex < headers.length; dayIndex++) {
         const currentDate = headers[dayIndex] ? headers[dayIndex].trim() : "";
         
-        // On vérifie que c'est bien un jour (JJ/MM/AAAA) et pas une semaine
-        if (!currentDate.match(dateRegex)) continue; 
+        // On vérifie que c'est bien une date ou une semaine
+        if (!currentDate.match(dateOrWeekRegex)) continue; 
 
         let bs_1_2 = 0, bs_3_2 = 0, pf_1_2 = 0, pf_3_2 = 0;
         let l43_1_2 = 0, l31_1_2 = 0, l70_1_2 = 0;
 
-        // On démarre la lecture juste sous la ligne d'en-tête
         for (let r = headerRowIndex + 1; r < rows.length; r++) {
             const row = rows[r];
             if (row.length <= dayIndex) continue;
@@ -159,16 +158,18 @@ function analyserPlanif() {
             }
         }
 
-        let dailyReport = `<div class="report-day"><h3>🗓️ Date : ${currentDate}</h3>`;
+        // Est-ce une analyse au jour ou à la semaine ?
+        let periodLabel = currentDate.toLowerCase().startsWith('s') ? "Semaine" : "Date";
+        let dailyReport = `<div class="report-day"><h3>🗓️ ${periodLabel} : ${currentDate}</h3>`;
         let errorsToday = 0;
 
         // Règle 1 : PAL 16
         if ((bs_1_2 > 0 || bs_3_2 > 0) && (pf_1_2 > 0 || pf_3_2 > 0)) {
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">❌ Conflit sur le PAL 16</div>
-                Production détectée en Fabrication (BS) ET en Conditionnement (PF) pour les formats 1/2 ou 3/2 le même jour. Le PAL 16 ne peut faire qu'une action.
-                <div class="solution">Solution : Décaler le conditionnement (PF) des formats 1/2 et 3/2 à un jour où aucune fabrication (BS) de ces formats n'est prévue.</div>
+                <div class="alert-title">❌ Conflit potentiel sur le PAL 16</div>
+                Production détectée en Fabrication (BS) ET en Conditionnement (PF) pour les formats 1/2 ou 3/2 sur cette période. Le PAL 16 ne peut faire qu'une action par jour. 
+                <div class="solution">Attention : Sur une semaine complète, assurez-vous de ne pas planifier la Fab et le Condi le MÊME JOUR.</div>
             </div>`;
             errorsToday++;
         }
@@ -178,15 +179,15 @@ function analyserPlanif() {
         if (activeSter1Lines > 1) {
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">❌ Conflit sur le Stérilisateur 1 (STER 01)</div>
-                Plusieurs lignes de Fabrication (BS) au format 1/2 tournent en même temps.
-                <div class="solution">Solution : Ne faire tourner qu'une seule de ces lignes (L43, L31, ou L70) pour le format 1/2 ce jour-là.</div>
+                <div class="alert-title">❌ Conflit potentiel sur le Stérilisateur 1 (STER 01)</div>
+                Plusieurs lignes de Fabrication (BS) au format 1/2 sont prévues.
+                <div class="solution">Attention : Assurez-vous qu'elles ne tournent pas simultanément le même jour.</div>
             </div>`;
             errorsToday++;
         }
 
         if (errorsToday === 0) {
-            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes majeures (PAL 16, STER 01) sont respectées.</div>`;
+            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes majeures (PAL 16, STER 01) semblent respectées pour cette période.</div>`;
         } else {
             hasErrorsGlobal = true;
         }
@@ -199,7 +200,7 @@ function analyserPlanif() {
     }
 
     if (!hasErrorsGlobal) {
-        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté sur l\'ensemble de la période !</div>' + resultsArea.innerHTML;
+        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté sur l\'ensemble des dates et semaines !</div>' + resultsArea.innerHTML;
     }
 }
 </script>
