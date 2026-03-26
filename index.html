@@ -5,38 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Analyseur de Planification - Usine Camaret</title>
     <style>
-        :root {
-            --primary: #2563eb;
-            --bg: #f8fafc;
-            --card: #ffffff;
-            --text: #1e293b;
-            --error-bg: #fef2f2;
-            --error-text: #991b1b;
-            --success-bg: #f0fdf4;
-            --success-text: #166534;
-        }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 2rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
+        :root { --primary: #2563eb; --bg: #f8fafc; --card: #ffffff; --text: #1e293b; --error-bg: #fef2f2; --error-text: #991b1b; --success-bg: #f0fdf4; --success-text: #166534; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 2rem; display: flex; flex-direction: column; align-items: center; }
         .container { width: 100%; max-width: 1000px; }
         h1 { color: var(--primary); text-align: center; margin-bottom: 0.5rem; }
         p.subtitle { text-align: center; color: #64748b; margin-bottom: 2rem; }
         .card { background-color: var(--card); padding: 1.5rem; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1.5rem; }
-        textarea {
-            width: 100%; height: 200px; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px;
-            font-family: monospace; font-size: 14px; white-space: pre; overflow-wrap: normal; overflow-x: auto; box-sizing: border-box;
-        }
-        button {
-            display: block; width: 100%; padding: 1rem; background-color: var(--primary); color: white;
-            border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 1rem;
-        }
+        textarea { width: 100%; height: 200px; padding: 1rem; border: 1px solid #cbd5e1; border-radius: 6px; font-family: monospace; font-size: 14px; white-space: pre; overflow-wrap: normal; overflow-x: auto; box-sizing: border-box; }
+        button { display: block; width: 100%; padding: 1rem; background-color: var(--primary); color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 1rem; }
         button:hover { background-color: #1d4ed8; }
         .report-day { margin-top: 1.5rem; padding: 1rem; border-left: 4px solid #cbd5e1; background: #f1f5f9; }
         .report-day h3 { margin-top: 0; }
@@ -53,12 +29,10 @@
 <div class="container">
     <h1>Contrôleur de Contraintes - Camaret</h1>
     <p class="subtitle">Copiez votre tableau brut (y compris les semaines type s14/2026 et le stock) et collez-le ici.</p>
-
     <div class="card">
         <textarea id="dataInput" placeholder="Collez le tableau Excel ici..."></textarea>
         <button onclick="analyserPlanif()">Analyser la Planification</button>
     </div>
-
     <div id="resultsArea"></div>
 </div>
 
@@ -74,37 +48,27 @@ function analyserPlanif() {
     }
 
     const rows = rawData.split('\n').map(row => row.split('\t'));
-    
-    // Expression régulière pour les dates ou les semaines
     const dateOrWeekRegex = /(\d{2}[\/-]\d{2}[\/-]\d{2,4})|([sS]\d{1,2}\/\d{4})/; 
 
-    let headerRowIndex = -1;
-    let colDateStart = -1;
+    let headerRowIndex = -1, colDateStart = -1;
 
-    // 1. Chasse à l'en-tête
     for (let i = 0; i < rows.length; i++) {
         for (let j = 0; j < rows[i].length; j++) {
             if (rows[i][j] && rows[i][j].trim().match(dateOrWeekRegex)) {
-                headerRowIndex = i;
-                colDateStart = j;
-                break;
+                headerRowIndex = i; colDateStart = j; break;
             }
         }
         if (headerRowIndex !== -1) break;
     }
 
     if (headerRowIndex === -1) {
-        resultsArea.innerHTML += '<div class="alert alert-error">Impossible de trouver les dates ou les semaines (ex: 22/03/2026 ou s14/2026).</div>';
+        resultsArea.innerHTML += '<div class="alert alert-error">Impossible de trouver les dates ou les semaines.</div>';
         return;
     }
 
     const headers = rows[headerRowIndex];
-    let colFormat = -1;
-    let colLigne = -1;
-    let colNom = 0;
-    let colStock = -1; // Colonne de stock
+    let colFormat = -1, colLigne = -1, colNom = 0, colStock = -1;
 
-    // 2. Identification des colonnes
     for (let i = 0; i < headers.length; i++) {
         let h = headers[i].toLowerCase();
         if (h.includes("format")) colFormat = i;
@@ -113,30 +77,23 @@ function analyserPlanif() {
         if (h.includes("stock") || h.includes("aujourd'hui")) colStock = i; 
     }
 
-    if (colLigne === -1) {
-        colLigne = colDateStart - 1; 
-    }
+    if (colLigne === -1) colLigne = colDateStart - 1; 
 
     if (colFormat === -1 || colLigne === -1) {
         resultsArea.innerHTML += '<div class="alert alert-error">Impossible de détecter la colonne Format ou Ligne.</div>';
         return;
     }
 
-    // INITIALISATION DES STOCKS DE BOITES BLANCHES (BS)
     let stockDispoBS = {};
     if (colStock !== -1) {
         for (let r = headerRowIndex + 1; r < rows.length; r++) {
             let row = rows[r];
             let ligne = row[colLigne] ? row[colLigne].trim().toUpperCase() : "";
-            let isBS = ligne.includes('42') || ligne.includes('43') || ligne.includes('31') || ligne.includes('70');
-            
-            if (isBS) {
-                let codeFamille = ligne.split('-')[1]; // Ex: 4243-30461 -> on garde 30461
+            if (/42|43|31|70/.test(ligne)) {
+                let codeFamille = ligne.split('-')[1];
                 if (codeFamille) {
-                    let rawStock = row[colStock] ? row[colStock].replace(/\s/g, '').replace(',', '.') : "0";
-                    let stockVal = parseFloat(rawStock) || 0;
-                    if (!stockDispoBS[codeFamille]) stockDispoBS[codeFamille] = 0;
-                    stockDispoBS[codeFamille] += stockVal;
+                    let stockVal = parseFloat((row[colStock] || "0").replace(/\s/g, '').replace(',', '.')) || 0;
+                    stockDispoBS[codeFamille] = (stockDispoBS[codeFamille] || 0) + stockVal;
                 }
             }
         }
@@ -144,10 +101,8 @@ function analyserPlanif() {
 
     let hasErrorsGlobal = false;
 
-    // 3. Analyse de toutes les colonnes (Jours ET Semaines)
     for (let dayIndex = colDateStart; dayIndex < headers.length; dayIndex++) {
         const currentDate = headers[dayIndex] ? headers[dayIndex].trim() : "";
-        
         if (!currentDate.match(dateOrWeekRegex)) continue; 
 
         let bs_1_2 = [], bs_3_2 = [], pf_1_2 = [], pf_3_2 = [];
@@ -158,24 +113,21 @@ function analyserPlanif() {
             const row = rows[r];
             if (row.length <= dayIndex) continue;
 
-            let rawCell = row[dayIndex] ? row[dayIndex].replace(/\s/g, '').replace(',', '.') : "0";
-            let prodQty = parseFloat(rawCell) || 0;
+            let prodQty = parseFloat((row[dayIndex] || "0").replace(/\s/g, '').replace(',', '.')) || 0;
             if (prodQty <= 0) continue; 
 
             let nomArticle = row[colNom] ? row[colNom].trim() : "Article inconnu";
             let format = row[colFormat] ? row[colFormat].trim() : "";
             let ligne = row[colLigne] ? row[colLigne].trim().toUpperCase() : "";
             
-            // MAJ : Ajout des nouvelles nomenclatures de lignes L02, L03, L05 pour le PF
-            let isBS = ligne.includes('42') || ligne.includes('43') || ligne.includes('31') || ligne.includes('70');
-            let isPF = ligne.includes('52') || ligne.includes('CDTL') || ligne.includes('L02') || ligne.includes('L03') || ligne.includes('L05');
+            let isBS = /42|43|31|70/.test(ligne);
+            let isPF = /52|CDTL|L02|L03|L05/.test(ligne);
 
             let item = { nom: nomArticle, machine: ligne, qty: prodQty };
 
             if (format.includes('1/2')) {
                 if (isBS) bs_1_2.push(item);
                 if (isPF) pf_1_2.push(item);
-                
                 if (ligne.includes('43')) l43_1_2.push(item);
                 if (ligne.includes('31')) l31_1_2.push(item);
                 if (ligne.includes('70')) l70_1_2.push(item);
@@ -195,66 +147,87 @@ function analyserPlanif() {
         let dailyReport = `<div class="report-day"><h3>🗓️ ${periodLabel} : ${currentDate}</h3>`;
         let errorsToday = 0;
 
-        // NOUVEAU : Règle de Série Ligne 42 (Raviolis)
-        let l42_32_items = bs_3_2.filter(i => i.machine.includes('42'));
-        let l42_44_items = bs_4_4.filter(i => i.machine.includes('42'));
-        if (l42_32_items.length > 0 && l42_44_items.length > 0) {
-            let refsL42 = [...l42_32_items, ...l42_44_items].map(i => `<li>${i.nom} (Ligne ${i.machine})</li>`).join('');
-            dailyReport += `
-            <div class="alert alert-error">
-                <div class="alert-title">❌ Conflit de Série sur Ligne 42 (Raviolis)</div>
-                Mélange interdit des formats 3/2 et 4/4 sur la Ligne 42 dans la même période.
-                <ul class="ref-list">${refsL42}</ul>
-                <div class="solution">Solution : Ne mélangez jamais le 3/2 et le 4/4 la même semaine. Planifiez des séries de 4 à 5 jours consécutifs sur un même format.</div>
-            </div>`;
-            errorsToday++;
-        }
-
-        // Règle 1 : PAL 16 (Mise à jour avec la règle stricte du Taboulé)
-        if ((bs_1_2.length > 0 || bs_3_2.length > 0) && (pf_1_2.length > 0 || pf_3_2.length > 0)) {
-            let refsFabrication = [...bs_1_2, ...bs_3_2].map(i => `<li><b>BS :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
-            let refsConditionnement = [...pf_1_2, ...pf_3_2].map(i => `<li><b>PF :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
-            
-            let conflitTitre = isWeek ? "❌ Conflit potentiel sur le PAL 16" : "❌ Conflit BLOQUANT sur le PAL 16";
-            let solutionTexte = isWeek ? 
-                "Attention : Sur une semaine complète, assurez-vous de ne pas planifier la Fab et le Condi ci-dessus le MÊME JOUR." : 
-                "Solution : Le PAL 16 ne fait qu'une action. Décalez le conditionnement à un jour sans fabrication 1/2 ou 3/2. (Rappel : Si L70 fait du Taboulé 1/2, aucune reprise PF de Raviolis/Cannellonis n'est possible ce jour-là).";
-
-            dailyReport += `
-            <div class="alert alert-error">
-                <div class="alert-title">${conflitTitre}</div>
-                Production détectée en Fabrication (BS) ET en Conditionnement (PF) pour les formats 1/2 ou 3/2 sur cette période :
-                <ul class="ref-list">${refsFabrication}${refsConditionnement}</ul>
-                <div class="solution">${solutionTexte}</div>
-            </div>`;
-            errorsToday++;
-        }
-
-        // Règle 2 : Stérilisateur 1 (Mise à jour stricte)
+        // --- REGLE STER 01 ---
         let activeSter1Lines = (l43_1_2.length > 0 ? 1 : 0) + (l31_1_2.length > 0 ? 1 : 0) + (l70_1_2.length > 0 ? 1 : 0);
         if (activeSter1Lines > 1) {
             let refsSter = [...l43_1_2, ...l31_1_2, ...l70_1_2].map(i => `<li>${i.nom} (Ligne ${i.machine})</li>`).join('');
-            let conflitTitre = isWeek ? "❌ Conflit potentiel sur le Stérilisateur 1 (STER 01)" : "❌ Conflit BLOQUANT sur le Stérilisateur 1 (STER 01)";
-            let solutionTexte = isWeek ? 
-                "Attention : Assurez-vous que ces fabrications ne tournent pas simultanément le même jour." : 
-                "Solution : Il est strictement interdit de planifier la L43, la L31 et la L70 le même jour. Une seule machine peut sortir du 1/2 à la fois.";
-
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">${conflitTitre}</div>
-                Plusieurs lignes de Fabrication (BS) au format 1/2 sont prévues en même temps :
+                <div class="alert-title">❌ Conflit BLOQUANT sur le Stérilisateur 1 (STER 01)</div>
+                Règle d'exclusivité violée. Ces fabrications sont planifiées simultanément :
                 <ul class="ref-list">${refsSter}</ul>
-                <div class="solution">${solutionTexte}</div>
+                <div class="solution">Solution : Vous ne pouvez faire tourner qu'UNE SEULE ligne au format 1/2 par jour.</div>
             </div>`;
             errorsToday++;
         }
 
-        // Règle 3 : Quarantaine avec prise en compte du stock
+        // --- NOUVELLE REGLE PAL 16 (DÉBORD & REPRISE) ---
+        let pal16_uses = [];
+        
+        // 1. Débord ou Rangement par les lignes de Fabrication
+        if (l70_1_2.length > 0) pal16_uses.push("Fabrication Taboulé/PEXO 1/2 (L70) -> <b>Monopolise PAL 16 pour rangement</b>");
+        if (l43_1_2.length > 0) pal16_uses.push("Fabrication Raviolis 1/2 (L43) -> <b>Réserve PAL 16 en Débord (Sécurité)</b>");
+        let l42_32_bs = bs_3_2.filter(i => i.machine.includes('42'));
+        if (l42_32_bs.length > 0) pal16_uses.push("Fabrication Raviolis 3/2 (L42) -> <b>Réserve PAL 16 en Débord (Sécurité)</b>");
+
+        // 2. Détection des Reprises (Conditionnement SANS fabrication le même jour)
+        let bsTodayFamilies = [...bs_1_2, ...bs_3_2, ...bs_4_4].map(bs => bs.machine.split('-')[1]).filter(f => f);
+        let forcedRepriseFamilies = [];
+        bs_4_4.forEach(bs => { if (bs.machine.includes('31')) forcedRepriseFamilies.push(bs.machine.split('-')[1]); }); // L31 4/4
+        bs_1_2.forEach(bs => { if (bs.machine.includes('70')) forcedRepriseFamilies.push(bs.machine.split('-')[1]); }); // L70 1/2
+
+        let reprises_PF = [];
+        [...pf_1_2, ...pf_3_2].forEach(pf => {
+            let codeFamillePF = pf.machine.split('-')[1];
+            // C'est une reprise SI la BS ne tourne pas aujourd'hui, OU si c'est une famille à reprise obligatoire (Taboulé)
+            if (codeFamillePF && (!bsTodayFamilies.includes(codeFamillePF) || forcedRepriseFamilies.includes(codeFamillePF))) {
+                reprises_PF.push(pf.nom);
+            }
+        });
+
+        // Supprimer les doublons de noms pour l'affichage
+        reprises_PF = [...new Set(reprises_PF)];
+        if (reprises_PF.length > 0) {
+            pal16_uses.push("Reprise de stock -> <b>Utilise PAL 16 pour dépalettiser :</b> " + reprises_PF.join(', '));
+        }
+
+        if (pal16_uses.length > 1) {
+            dailyReport += `
+            <div class="alert alert-error">
+                <div class="alert-title">❌ Conflit BLOQUANT sur le PAL 16</div>
+                Le PAL 16 est monopolisé par plusieurs actions incompatibles aujourd'hui :
+                <ul class="ref-list"><li>${pal16_uses.join('</li><li>')}</li></ul>
+                <div class="solution">Règle : Aucune reprise de stock n'est possible si la L43, L42 ou L70 tournent. Le PAL 16 ne peut faire qu'une action.</div>
+            </div>`;
+            errorsToday++;
+        }
+
+        // --- REGLE DE SERIE LIGNE 42 ---
+        let l42_44_items = bs_4_4.filter(i => i.machine.includes('42'));
+        if (l42_32_bs.length > 0 && l42_44_items.length > 0) {
+            dailyReport += `
+            <div class="alert alert-error">
+                <div class="alert-title">❌ Conflit de Série sur Ligne 42</div>
+                Mélange interdit des formats 3/2 et 4/4 sur la Ligne 42.
+                <div class="solution">Solution : Planifiez des séries de 4 à 5 jours consécutifs sur un même format.</div>
+            </div>`;
+            errorsToday++;
+        }
+
+        // --- REGLE QUARANTAINE INTELLIGENTE (Gère le flux direct) ---
         let pfEnQuarantaine = [];
         let pfDailyNeeds = {};
+        let bsTodayQty = {}; // Pour déduire le flux direct
+
+        [...bs_1_2, ...bs_3_2, ...bs_4_4].forEach(bs => {
+            let codeFamilleBS = bs.machine.split('-')[1];
+            if (codeFamilleBS) {
+                if (!bsTodayQty[codeFamilleBS]) bsTodayQty[codeFamilleBS] = 0;
+                bsTodayQty[codeFamilleBS] += bs.qty;
+            }
+        });
         
-        let pfPrevu = [...pf_1_2, ...pf_3_2, ...pf_4_4];
-        pfPrevu.forEach(pf => {
+        [...pf_1_2, ...pf_3_2, ...pf_4_4].forEach(pf => {
             let codeFamillePF = pf.machine.split('-')[1];
             if (codeFamillePF) {
                 if (!pfDailyNeeds[codeFamillePF]) pfDailyNeeds[codeFamillePF] = { qty: 0, items: [] };
@@ -266,30 +239,37 @@ function analyserPlanif() {
         for (let codeFamille in pfDailyNeeds) {
             let besoin = pfDailyNeeds[codeFamille].qty;
             let stockDispo = stockDispoBS[codeFamille] || 0; 
+            let prodAujourdhui = bsTodayQty[codeFamille] || 0;
 
-            if (besoin > stockDispo) {
-                let manquant = besoin - stockDispo;
-                let noms = pfDailyNeeds[codeFamille].items.join(', ');
-                pfEnQuarantaine.push(`<li><b>PF prévu :</b> ${noms} <br><i>Besoin : ${besoin.toLocaleString('fr-FR')} | Stock initial : ${stockDispo.toLocaleString('fr-FR')} | <b>Manquant : ${manquant.toLocaleString('fr-FR')} boîtes</b>. (Ce manque tape dans la prod récente = violation quarantaine)</i></li>`);
-                stockDispoBS[codeFamille] = 0; // On a vidé le stock
-            } else {
-                stockDispoBS[codeFamille] -= besoin; // On déduit le besoin du stock pour les jours d'après
+            // Si Reprise Obligatoire, le flux direct est interdit (prodAujourdhui ignorée pour couvrir le besoin)
+            if (forcedRepriseFamilies.includes(codeFamille)) prodAujourdhui = 0;
+
+            let besoinNet = besoin - prodAujourdhui; // On couvre le besoin par la prod du jour (Flux direct)
+
+            if (besoinNet > 0) {
+                if (besoinNet > stockDispo) {
+                    let manquant = besoinNet - stockDispo;
+                    pfEnQuarantaine.push(`<li><b>PF prévu :</b> ${pfDailyNeeds[codeFamille].items.join(', ')} <br><i>Besoin non couvert par flux direct : ${besoinNet.toLocaleString('fr-FR')} | Stock initial : ${stockDispo.toLocaleString('fr-FR')} | <b>Manquant : ${manquant.toLocaleString('fr-FR')} boîtes</b>.</i></li>`);
+                    stockDispoBS[codeFamille] = 0; 
+                } else {
+                    stockDispoBS[codeFamille] -= besoinNet; 
+                }
             }
         }
 
         if (pfEnQuarantaine.length > 0) {
             dailyReport += `
             <div class="alert alert-error">
-                <div class="alert-title">⚠️ Violation de la Quarantaine (8 jours)</div>
-                Le stock actuel de boîtes blanches est insuffisant pour couvrir ce conditionnement :
+                <div class="alert-title">⚠️ Violation de la Quarantaine (8 jours) / Rupture</div>
+                Le stock actuel de boîtes blanches est insuffisant pour couvrir cette Reprise :
                 <ul class="ref-list">${pfEnQuarantaine.join('')}</ul>
-                <div class="solution">Solution : Retardez ces conditionnements de 8 jours pour laisser mûrir les nouvelles fabrications.</div>
+                <div class="solution">Solution : Retardez ces conditionnements pour laisser mûrir les nouvelles fabrications.</div>
             </div>`;
             errorsToday++;
         }
 
         if (errorsToday === 0) {
-            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes (Séries, PAL 16, STER 01, Stocks/Quarantaine) sont respectées.</div>`;
+            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes (Séries, PAL 16, STER 01, Flux Direct/Stocks) sont parfaitement respectées.</div>`;
         } else {
             hasErrorsGlobal = true;
         }
@@ -303,7 +283,7 @@ function analyserPlanif() {
     }
 
     if (!hasErrorsGlobal) {
-        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté, les séries sont bonnes, et les stocks couvrent bien vos conditionnements !</div>' + resultsArea.innerHTML;
+        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté, l\'ordonnancement est validé !</div>' + resultsArea.innerHTML;
     }
 }
 </script>
