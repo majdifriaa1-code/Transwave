@@ -102,7 +102,7 @@ function analyserPlanif() {
     let colFormat = -1;
     let colLigne = -1;
     let colNom = 0;
-    let colStock = -1; // NOUVEAU : Colonne de stock
+    let colStock = -1; // Colonne de stock
 
     // 2. Identification des colonnes
     for (let i = 0; i < headers.length; i++) {
@@ -110,7 +110,7 @@ function analyserPlanif() {
         if (h.includes("format")) colFormat = i;
         if (h.includes("ligne") || h.includes("boite")) colLigne = i;
         if (h.includes("nom") || h.includes("article")) colNom = i;
-        if (h.includes("stock") || h.includes("aujourd'hui")) colStock = i; // Détection du stock
+        if (h.includes("stock") || h.includes("aujourd'hui")) colStock = i; 
     }
 
     if (colLigne === -1) {
@@ -122,7 +122,7 @@ function analyserPlanif() {
         return;
     }
 
-    // NOUVEAU : INITIALISATION DES STOCKS DE BOITES BLANCHES (BS)
+    // INITIALISATION DES STOCKS DE BOITES BLANCHES (BS)
     let stockDispoBS = {};
     if (colStock !== -1) {
         for (let r = headerRowIndex + 1; r < rows.length; r++) {
@@ -166,8 +166,9 @@ function analyserPlanif() {
             let format = row[colFormat] ? row[colFormat].trim() : "";
             let ligne = row[colLigne] ? row[colLigne].trim().toUpperCase() : "";
             
+            // MAJ : Ajout des nouvelles nomenclatures de lignes L02, L03, L05 pour le PF
             let isBS = ligne.includes('42') || ligne.includes('43') || ligne.includes('31') || ligne.includes('70');
-            let isPF = ligne.includes('52') || ligne.includes('CDTL');
+            let isPF = ligne.includes('52') || ligne.includes('CDTL') || ligne.includes('L02') || ligne.includes('L03') || ligne.includes('L05');
 
             let item = { nom: nomArticle, machine: ligne, qty: prodQty };
 
@@ -194,7 +195,22 @@ function analyserPlanif() {
         let dailyReport = `<div class="report-day"><h3>🗓️ ${periodLabel} : ${currentDate}</h3>`;
         let errorsToday = 0;
 
-        // Règle 1 : PAL 16
+        // NOUVEAU : Règle de Série Ligne 42 (Raviolis)
+        let l42_32_items = bs_3_2.filter(i => i.machine.includes('42'));
+        let l42_44_items = bs_4_4.filter(i => i.machine.includes('42'));
+        if (l42_32_items.length > 0 && l42_44_items.length > 0) {
+            let refsL42 = [...l42_32_items, ...l42_44_items].map(i => `<li>${i.nom} (Ligne ${i.machine})</li>`).join('');
+            dailyReport += `
+            <div class="alert alert-error">
+                <div class="alert-title">❌ Conflit de Série sur Ligne 42 (Raviolis)</div>
+                Mélange interdit des formats 3/2 et 4/4 sur la Ligne 42 dans la même période.
+                <ul class="ref-list">${refsL42}</ul>
+                <div class="solution">Solution : Ne mélangez jamais le 3/2 et le 4/4 la même semaine. Planifiez des séries de 4 à 5 jours consécutifs sur un même format.</div>
+            </div>`;
+            errorsToday++;
+        }
+
+        // Règle 1 : PAL 16 (Mise à jour avec la règle stricte du Taboulé)
         if ((bs_1_2.length > 0 || bs_3_2.length > 0) && (pf_1_2.length > 0 || pf_3_2.length > 0)) {
             let refsFabrication = [...bs_1_2, ...bs_3_2].map(i => `<li><b>BS :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
             let refsConditionnement = [...pf_1_2, ...pf_3_2].map(i => `<li><b>PF :</b> ${i.nom} (Ligne ${i.machine})</li>`).join('');
@@ -202,7 +218,7 @@ function analyserPlanif() {
             let conflitTitre = isWeek ? "❌ Conflit potentiel sur le PAL 16" : "❌ Conflit BLOQUANT sur le PAL 16";
             let solutionTexte = isWeek ? 
                 "Attention : Sur une semaine complète, assurez-vous de ne pas planifier la Fab et le Condi ci-dessus le MÊME JOUR." : 
-                "Solution : Le PAL 16 ne fait qu'une action. Décalez le conditionnement de ces PF à un jour sans fabrication de format 1/2 ou 3/2.";
+                "Solution : Le PAL 16 ne fait qu'une action. Décalez le conditionnement à un jour sans fabrication 1/2 ou 3/2. (Rappel : Si L70 fait du Taboulé 1/2, aucune reprise PF de Raviolis/Cannellonis n'est possible ce jour-là).";
 
             dailyReport += `
             <div class="alert alert-error">
@@ -214,12 +230,14 @@ function analyserPlanif() {
             errorsToday++;
         }
 
-        // Règle 2 : Stérilisateur 1
+        // Règle 2 : Stérilisateur 1 (Mise à jour stricte)
         let activeSter1Lines = (l43_1_2.length > 0 ? 1 : 0) + (l31_1_2.length > 0 ? 1 : 0) + (l70_1_2.length > 0 ? 1 : 0);
         if (activeSter1Lines > 1) {
             let refsSter = [...l43_1_2, ...l31_1_2, ...l70_1_2].map(i => `<li>${i.nom} (Ligne ${i.machine})</li>`).join('');
             let conflitTitre = isWeek ? "❌ Conflit potentiel sur le Stérilisateur 1 (STER 01)" : "❌ Conflit BLOQUANT sur le Stérilisateur 1 (STER 01)";
-            let solutionTexte = isWeek ? "Attention : Assurez-vous que ces fabrications ne tournent pas simultanément le même jour." : "Solution : Ne faire tourner qu'une seule de ces lignes pour le format 1/2 ce jour-là.";
+            let solutionTexte = isWeek ? 
+                "Attention : Assurez-vous que ces fabrications ne tournent pas simultanément le même jour." : 
+                "Solution : Il est strictement interdit de planifier la L43, la L31 et la L70 le même jour. Une seule machine peut sortir du 1/2 à la fois.";
 
             dailyReport += `
             <div class="alert alert-error">
@@ -231,7 +249,7 @@ function analyserPlanif() {
             errorsToday++;
         }
 
-        // NOUVEAU : Règle 3 - Quarantaine avec prise en compte du stock
+        // Règle 3 : Quarantaine avec prise en compte du stock
         let pfEnQuarantaine = [];
         let pfDailyNeeds = {};
         
@@ -271,7 +289,7 @@ function analyserPlanif() {
         }
 
         if (errorsToday === 0) {
-            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes (PAL 16, STER 01, Stocks/Quarantaine) sont respectées.</div>`;
+            dailyReport += `<div class="alert alert-success">✅ Toutes les contraintes (Séries, PAL 16, STER 01, Stocks/Quarantaine) sont respectées.</div>`;
         } else {
             hasErrorsGlobal = true;
         }
@@ -285,7 +303,7 @@ function analyserPlanif() {
     }
 
     if (!hasErrorsGlobal) {
-        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté, et les stocks couvrent bien vos conditionnements !</div>' + resultsArea.innerHTML;
+        resultsArea.innerHTML = '<h2>Rapport d\'analyse</h2><div class="alert alert-success"><div class="alert-title">🎉 Parfait !</div>Aucun conflit détecté, les séries sont bonnes, et les stocks couvrent bien vos conditionnements !</div>' + resultsArea.innerHTML;
     }
 }
 </script>
